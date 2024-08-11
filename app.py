@@ -16,7 +16,7 @@ def main():
 
     # Sidebar navigation
     st.sidebar.title("Navigation")
-    menu = ["Upload file", "Bot"]
+    menu = [":file_folder: Upload file", ":robot_face: Bot"]
     
     choice = st.sidebar.radio(
         "Select an option",
@@ -28,10 +28,10 @@ def main():
     )
 
     
-    if choice == "Upload file":
+    if choice == ":file_folder: Upload file":
         upload_file()
     
-    elif choice == "Bot":
+    elif choice == ":robot_face: Bot":
         start_bot()
             
 if __name__ == '__main__':

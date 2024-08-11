@@ -10,70 +10,84 @@ from langchain_openai import ChatOpenAI
 
 #aux
 import pandas as pd
-import ast
+from io import StringIO
+
+#db functions
+from db_functions import get_table_structure,get_table_info, execute_query
 
 #API_KEY - OPEN AI
 API_KEY = st.secrets.api_key 
-#DB Connection variables
-DB_NAME = st.secrets.db_credentials.db_name 
-DB_USER = st.secrets.db_credentials.db_user 
-DB_PASS = st.secrets.db_credentials.db_pass 
-DB_HOST = st.secrets.db_credentials.db_host 
-DB_PORT = st.secrets.db_credentials.db_port 
+connection_string = 'sqlite:///database.db'
 
 def start_bot():
     # app config
-    st.title("Streaming bot")
+    st.title(":right_anger_bubble: SQL bot")
+    info = get_table_info()
+    if (info['status']):
+        with st.expander(":grey_question: Help"):
+            st.write(":card_index_dividers: Table structure:")
+            st.write(get_table_structure())    
+            st.write(":mag_right: Data preview")
+            st.write(info['data']) 
+        # session state
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = [
+                AIMessage(content="Hello, I’m a SQL bot. Feel free to ask me any questions about the uploaded dataset."),
+            ]
+            
+        # conversation
+        for message in st.session_state.chat_history:
+            if isinstance(message, AIMessage):
+                with st.chat_message("AI"):
+                    try:
+                        messages = message.content.split('/')
+                        if(messages[0] == 'query'):
+                            st.code(messages[1], language="sql", line_numbers=False)
+                            # Convert the string to a DataFrame
+                            df = pd.read_csv(StringIO(messages[2]))
+                            st.write(df)     
+                        else:        
+                            st.write(message.content)
+                    except Exception as e:
+                        print(e)
+                        st.write('Something went wrong please try again')
 
-    # session state
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = [
-            AIMessage(content="Hello, I am a bot. How can I help you?"),
-        ]
-
-        
-    # conversation
-    for message in st.session_state.chat_history:
-        if isinstance(message, AIMessage):
-            with st.chat_message("AI"):
-                messages = message.content.split('/')
-                if(messages[0] == 'query'):
-                    st.code(messages[1], language="sql", line_numbers=False)
-                    tuple_data = ast.literal_eval(messages[2])
-                    st.write(pd.DataFrame(tuple_data))     
-                else:        
+            elif isinstance(message, HumanMessage):
+                with st.chat_message("Human"):
                     st.write(message.content)
 
-        elif isinstance(message, HumanMessage):
+        # user input
+        user_query = st.chat_input("Type your message here...")
+        if user_query is not None and user_query != "":
+            st.session_state.chat_history.append(HumanMessage(content=user_query))
+
             with st.chat_message("Human"):
-                st.write(message.content)
+                st.markdown(user_query)
 
-    # user input
-    user_query = st.chat_input("Type your message here...")
-    if user_query is not None and user_query != "":
-        st.session_state.chat_history.append(HumanMessage(content=user_query))
-
-        with st.chat_message("Human"):
-            st.markdown(user_query)
-
-        with st.chat_message("AI"):
-            response = get_response(user_query, st.session_state.chat_history)            
-            if response['type'] == 'query':
-                st.code(response['query'], language="sql", line_numbers=False)
-                data = []
-                if response['data']:
+            with st.chat_message("AI"):
+                response = get_response(user_query, st.session_state.chat_history)            
+                if response['type'] == 'query':
+                    st.code(response['query'], language="sql", line_numbers=False)
+                    data = response['data']
                     try:
-                        data = ast.literal_eval(response['data'])  
-                        st.write(pd.DataFrame(data))        
-                        st.session_state.chat_history.append(AIMessage(content=f"{response['type']}/{response['query']}/{data}"))         
-                    except Exception as e:
-                        data = 'Someting happened please try again.'
                         st.write(data)
+                        # Convert dataframe to string
+                        csv_string = data.to_csv(index=False)
+                        # Append history       
+                        st.session_state.chat_history.append(AIMessage(content=f"{response['type']}/{response['query']}/{csv_string}"))         
+                    except Exception as e:
+                        data = 'Something went wrong please try again.'
+                        st.write(data)
+                        # Append history       
                         st.session_state.chat_history.append(AIMessage(content=data))
-                
-            else:
-                st.write("I'm sorry, but the question provided is not clear. Kindly provide a valid question.")
-                st.session_state.chat_history.append(AIMessage(content=f"I'm sorry, but the question provided is not clear. Kindly provide a valid question."))
+                    
+                else:
+                    st.write("I'm sorry, but the question provided is not clear. Kindly provide a valid question.")
+                    st.session_state.chat_history.append(AIMessage(content=f"I'm sorry, but the question provided is not clear. Kindly provide a valid question."))
+    else:
+        st.error('Please upload a file', icon="🚨")
+
+    
             
             
 def get_response(user_query, chat_history):
@@ -82,17 +96,15 @@ def get_response(user_query, chat_history):
 
         try:
 
-            # connection_string = f'postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
-            connection_string = 'sqlite:///database.db'
-            
             llm = ChatOpenAI(openai_api_key=api_key)
             db = SQLDatabase.from_uri(connection_string)
-
             chain = create_sql_query_chain(llm, db)        
             response = chain.invoke({"question": user_query, "chat_history": chat_history})   
-        
-            data = db.run(response)
-            return {'type': 'query', 'query': response, 'data': data}            
+            data = execute_query(response)
+            if data is not None:
+                return {'type': 'query', 'query': response, 'data': data}  
+            else:
+                return {'type': 'error', 'query': '', 'data': ''}
         except Exception as e:
             print(e)
             return {'type': 'error', 'query': '', 'data': ''}
