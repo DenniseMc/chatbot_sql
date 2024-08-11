@@ -8,24 +8,18 @@ from langchain_community.utilities import SQLDatabase
 from langchain.chains import create_sql_query_chain
 from langchain_openai import ChatOpenAI
 
-#env
-import os
-from dotenv import load_dotenv
-
 #aux
 import pandas as pd
 import ast
 
-load_dotenv('.env')
-
 #API_KEY - OPEN AI
-API_KEY = os.getenv("API_KEY")
+API_KEY = st.secrets.api_key 
 #DB Connection variables
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
+DB_NAME = st.secrets.db_credentials.db_name 
+DB_USER = st.secrets.db_credentials.db_user 
+DB_PASS = st.secrets.db_credentials.db_pass 
+DB_HOST = st.secrets.db_credentials.db_host 
+DB_PORT = st.secrets.db_credentials.db_port 
 
 def start_bot():
     # app config
@@ -68,10 +62,15 @@ def start_bot():
                 st.code(response['query'], language="sql", line_numbers=False)
                 data = []
                 if response['data']:
-                    data = ast.literal_eval(response['data'])
+                    try:
+                        data = ast.literal_eval(response['data'])  
+                        st.write(pd.DataFrame(data))        
+                        st.session_state.chat_history.append(AIMessage(content=f"{response['type']}/{response['query']}/{data}"))         
+                    except Exception as e:
+                        data = 'Someting happened please try again.'
+                        st.write(data)
+                        st.session_state.chat_history.append(AIMessage(content=data))
                 
-                st.write(pd.DataFrame(data))        
-                st.session_state.chat_history.append(AIMessage(content=f"{response['type']}/{response['query']}/{data}"))        
             else:
                 st.write("I'm sorry, but the question provided is not clear. Kindly provide a valid question.")
                 st.session_state.chat_history.append(AIMessage(content=f"I'm sorry, but the question provided is not clear. Kindly provide a valid question."))
@@ -81,18 +80,18 @@ def get_response(user_query, chat_history):
         
         api_key = API_KEY
 
-        connection_string = f'postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
-        
-        llm = ChatOpenAI(openai_api_key=api_key)
-        db = SQLDatabase.from_uri(connection_string)
-
-        chain = create_sql_query_chain(llm, db)        
-        response = chain.invoke({"question": user_query, "chat_history": chat_history})   
-        print(response)     
-
         try:
+
+            # connection_string = f'postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+            connection_string = 'sqlite:///database.db'
+            
+            llm = ChatOpenAI(openai_api_key=api_key)
+            db = SQLDatabase.from_uri(connection_string)
+
+            chain = create_sql_query_chain(llm, db)        
+            response = chain.invoke({"question": user_query, "chat_history": chat_history})   
+        
             data = db.run(response)
-            print(data)
             return {'type': 'query', 'query': response, 'data': data}            
         except Exception as e:
             print(e)
